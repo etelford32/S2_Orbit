@@ -1,0 +1,467 @@
+import pygame
+import math
+import numpy as np
+from datetime import datetime
+
+# Initialize Pygame
+pygame.init()
+
+# Constants
+WIDTH, HEIGHT = 1024, 768
+BACKGROUND = (0, 0, 0)
+WHITE = (255, 255, 255)
+YELLOW = (255, 255, 0)
+RED = (255, 0, 0)
+SELECTION_COLOR = (0, 255, 0)
+ACCRETION_COLOR = (139, 69, 19)  # Brown
+MAGNETIC_COLOR = (0, 100, 255)    # Blue
+
+# Physical constants
+G = 6.67430e-11  # Gravitational constant
+c = 3e8          # Speed of light
+M_SagA = 4.154e6 * 1.989e30  # Sagittarius A* mass
+J = 0.616 * G * (M_SagA**2) / c  # Angular momentum
+AU = 1.496e11    # Astronomical Unit
+YEAR = 365.25 * 24 * 3600  # Year in seconds
+
+class AccretionParticle:
+    def __init__(self, distance, angle):
+        self.distance = distance
+        self.angle = angle
+        self.angular_velocity = math.sqrt(G * M_SagA / (distance**3))
+        self.lifetime = 0
+        self.max_lifetime = np.random.uniform(1.0, 3.0)
+        # Initialize color with alpha channel
+        self.color = [ACCRETION_COLOR[0], ACCRETION_COLOR[1], ACCRETION_COLOR[2], 255]
+    
+    def update(self, dt):
+        self.angle += self.angular_velocity * dt
+        self.lifetime += dt/self.max_lifetime
+        # Fade out as lifetime increases
+        self.color[3] = max(0, int(255 * (1 - self.lifetime)))
+        return self.lifetime >= 1.0
+    
+    def get_position(self):
+        x = self.distance * math.cos(self.angle)
+        y = self.distance * math.sin(self.angle)
+        return (x, y)
+
+class MagneticField:
+    def __init__(self):
+        self.lines = []
+        self.generate_field_lines()
+        self.rotation_angle = 0
+        self.rotation_speed = 0.1  # Radians per second
+        
+    def generate_field_lines(self):
+        # Generate branching magnetic field lines
+        for angle in np.linspace(0, 2*math.pi, 8):
+            base_points = []
+            # Main branch
+            for t in np.linspace(0, 1, 20):
+                r = 30 * AU * (1 + t)
+                x = r * math.cos(angle + t*0.5)
+                y = r * math.sin(angle + t*0.5)
+                base_points.append((x, y))
+            self.lines.append(base_points)
+            
+            # Sub branches
+            if np.random.random() < 0.5:
+                for t in np.linspace(0.3, 0.7, 2):
+                    branch_points = []
+                    branch_angle = angle + t*0.5 + np.random.uniform(-0.5, 0.5)
+                    for s in np.linspace(0, 0.5, 10):
+                        r = 30 * AU * (1 + t + s)
+                        x = r * math.cos(branch_angle + s*0.3)
+                        y = r * math.sin(branch_angle + s*0.3)
+                        branch_points.append((x, y))
+                    self.lines.append(branch_points)
+    
+    def update(self, dt):
+        self.rotation_angle += self.rotation_speed * dt
+    
+    def draw(self, screen, camera):
+        # Rotate and draw each magnetic field line
+        for line in self.lines:
+            rotated_points = []
+            for x, y in line:
+                # Rotate points
+                cos_rot = math.cos(self.rotation_angle)
+                sin_rot = math.sin(self.rotation_angle)
+                x_rot = x * cos_rot - y * sin_rot
+                y_rot = x * sin_rot + y * cos_rot
+                screen_pos = camera.world_to_screen(x_rot, y_rot)
+                rotated_points.append(screen_pos)
+            
+            if len(rotated_points) > 1:
+                # Draw with fading intensity
+                for i in range(len(rotated_points)-1):
+                    intensity = 255 * (1 - i/len(rotated_points))
+                    color = (MAGNETIC_COLOR[0], MAGNETIC_COLOR[1], 
+                            min(255, int(MAGNETIC_COLOR[2] * (1 - i/len(rotated_points)))))
+                    pygame.draw.line(screen, color, rotated_points[i], rotated_points[i+1], 1)
+
+# Star data
+STAR_DATA = {
+    "S2": {
+        "color": (255, 255, 0),  # Yellow
+        "semi_major": 120 * AU / (1 - 0.8847),  # Calculated from periapsis distance in AU
+        "eccentricity": 0.8847,
+        "inclination": 133.82,
+        "longitude_of_ascending_node": 227.85,
+        "argument_of_periapsis": 66.13,
+        "periapsis_time": 2018.37974,
+        "period": 16.05 * YEAR,
+        "periapsis_distance": 120 * AU,
+    },
+    "S62": {
+        "color": (255, 160, 0),  # Orange
+        "semi_major": 16 * AU / (1 - 0.976),  # Convert periapsis to AU before calculation
+        "eccentricity": 0.976,
+        "inclination": 123.4,
+        "longitude_of_ascending_node": 50.2,
+        "argument_of_periapsis": 56.9,
+        "periapsis_time": 2003.29,
+        "period": 9.9 * YEAR,
+        "periapsis_distance": 16 * AU,
+    },
+    "S4711": {
+        "color": (255, 100, 100),  # Pink
+        "semi_major": 21 * AU / (1 - 0.769),
+        "eccentricity": 0.769,
+        "inclination": 100.9,
+        "longitude_of_ascending_node": 341.2,
+        "argument_of_periapsis": 133.8,
+        "periapsis_time": 2003.48,
+        "period": 7.6 * YEAR,
+        "periapsis_distance": 21 * AU,
+    },
+    "S4714": {
+        "color": (100, 255, 255),  # Cyan
+        "semi_major": 12.6 * AU / (1 - 0.985),
+        "eccentricity": 0.985,
+        "inclination": 119.6,
+        "longitude_of_ascending_node": 81.2,
+        "argument_of_periapsis": 180.0,
+        "periapsis_time": 2003.32,
+        "period": 12.0 * YEAR,
+        "periapsis_distance": 12.6 * AU,
+    },
+    "S4716": {
+        "color": (200, 150, 255),  # Purple
+        "semi_major": 9.3 * AU / (1 - 0.756),
+        "eccentricity": 0.756,
+        "inclination": 97.0,
+        "longitude_of_ascending_node": 10.0,
+        "argument_of_periapsis": 347.0,
+        "periapsis_time": 2002.33,
+        "period": 4.0 * YEAR,
+        "periapsis_distance": 9.3 * AU,
+    }
+}
+
+class Camera:
+    def __init__(self):
+        self.zoom = 1.0
+        self.offset_x = 0
+        self.offset_y = 0
+    
+    def world_to_screen(self, x, y):
+        screen_x = WIDTH//2 + (x/AU - self.offset_x) * self.zoom
+        screen_y = HEIGHT//2 + (y/AU - self.offset_y) * self.zoom
+        return int(screen_x), int(screen_y)
+
+class BlackHole:
+    def __init__(self):
+        self.mass = M_SagA
+        self.rs = 2 * G * self.mass / (c**2)
+        self.position = (0, 0)
+        self.a = J / (self.mass * c)
+        self.rotation_angle = 0
+        self.rotation_speed = 0.5  # Radians per second
+        self.is_selected = False
+        self.click_radius = 20
+        
+        # Initialize particle system
+        self.particles = []
+        self.magnetic_field = MagneticField()
+        
+    def add_particle(self):
+        # Add new particle at random angle and distance
+        angle = np.random.uniform(0, 2*math.pi)
+        distance = np.random.uniform(5*AU, 15*AU)  # Reduced range for better visibility
+        self.particles.append(AccretionParticle(distance, angle))
+    
+    def check_click(self, mouse_pos, camera):
+        """Check if the black hole was clicked"""
+        screen_x, screen_y = camera.world_to_screen(*self.position)
+        distance = math.sqrt((mouse_pos[0] - screen_x)**2 + (mouse_pos[1] - screen_y)**2)
+        if distance <= self.click_radius * camera.zoom:
+            self.is_selected = not self.is_selected
+            return True
+        return False
+    
+    def update(self, dt):
+        self.rotation_angle += self.rotation_speed * dt
+        
+        # Update magnetic field
+        self.magnetic_field.update(dt)
+        
+        # Update particles
+        for particle in self.particles[:]:
+            if particle.update(dt):
+                self.particles.remove(particle)
+        
+        # Add new particles more frequently
+        if len(self.particles) < 300 and np.random.random() < 0.5:
+            self.add_particle()
+        
+    def draw(self, screen, camera):
+        x, y = camera.world_to_screen(*self.position)
+        radius = max(5, int(20 * camera.zoom))
+        
+        # Draw magnetic field lines
+        self.magnetic_field.draw(screen, camera)
+        
+        # Draw accretion disk particles with larger size
+        for particle in self.particles:
+            pos = particle.get_position()
+            screen_x, screen_y = camera.world_to_screen(pos[0], pos[1])
+            particle_size = max(2, int(3 * camera.zoom))
+            
+            # Create a surface for the particle with alpha
+            surface = pygame.Surface((particle_size * 2, particle_size * 2), pygame.SRCALPHA)
+            pygame.draw.circle(surface, (*particle.color[:3], particle.color[3]), 
+                             (particle_size, particle_size), particle_size)
+            screen.blit(surface, (screen_x - particle_size, screen_y - particle_size))
+        
+        # Draw event horizon with rotation effect
+        points = []
+        for angle in range(0, 360, 10):
+            rad = math.radians(angle)
+            # Add wobble effect based on rotation
+            r = radius * (1 + 0.1 * math.sin(rad * 2 + self.rotation_angle))
+            px = x + r * math.cos(rad)
+            py = y + r * math.sin(rad)
+            points.append((px, py))
+        
+        pygame.draw.polygon(screen, (20, 20, 20), points)  # Fill
+        pygame.draw.lines(screen, WHITE, True, points, 1)  # Outline
+        
+        # Draw ergosphere
+        ergo_radius = int(radius * 2)
+        points = []
+        for angle in range(0, 360, 10):
+            rad = math.radians(angle)
+            r = ergo_radius * (1 + 0.05 * math.sin(rad * 3 + self.rotation_angle))
+            px = x + r * math.cos(rad)
+            py = y + r * math.sin(rad)
+            points.append((px, py))
+        
+        pygame.draw.lines(screen, (50, 50, 50), True, points, 1)
+        
+        # Draw selection box if selected
+        if self.is_selected:
+            selection_size = max(radius * 3, 30)
+            rect = pygame.Rect(x - selection_size//2, y - selection_size//2, 
+                             selection_size, selection_size)
+            pygame.draw.rect(screen, SELECTION_COLOR, rect, 2)
+            
+            # Draw "SagA*" label when selected
+            font = pygame.font.SysFont(None, 24)
+            text = font.render("SagA*", True, WHITE)
+            screen.blit(text, (x + selection_size//2 + 5, y - selection_size//2))
+
+class Star:
+    def __init__(self, name, params):
+        self.name = name
+        self.color = params["color"]
+        self.semi_major = params["semi_major"]
+        self.eccentricity = params["eccentricity"]
+        self.inclination = math.radians(params["inclination"])
+        self.longitude_of_ascending_node = math.radians(params["longitude_of_ascending_node"])
+        self.argument_of_periapsis = math.radians(params["argument_of_periapsis"])
+        self.periapsis_time = params["periapsis_time"]
+        self.period = params["period"]
+        self.periapsis_distance = params["periapsis_distance"]
+        
+        self.current_time = 0
+        self.position = (self.semi_major, 0, 0)
+        self.orbit_points = []
+        self.is_selected = False
+        self.click_radius = 10
+        
+    def solve_kepler(self, M, max_iter=100):
+        E = M
+        for _ in range(max_iter):
+            E_next = E - (E - self.eccentricity * math.sin(E) - M) / (1 - self.eccentricity * math.cos(E))
+            if abs(E_next - E) < 1e-8:
+                return E_next
+            E = E_next
+        return E
+        
+    def update(self, dt):
+        self.current_time += dt
+        
+        # Calculate mean anomaly
+        M = 2 * math.pi * (self.current_time % self.period) / self.period
+        
+        # Solve Kepler's equation
+        E = self.solve_kepler(M)
+        
+        # Calculate true anomaly
+        nu = 2 * math.atan(math.sqrt((1 + self.eccentricity)/(1 - self.eccentricity)) * math.tan(E/2))
+        
+        # Calculate radius
+        r = self.semi_major * (1 - self.eccentricity**2) / (1 + self.eccentricity * math.cos(nu))
+        
+        # Calculate position in orbital plane
+        x = r * math.cos(nu)
+        y = r * math.sin(nu)
+        z = 0
+        
+        # Rotate by argument of periapsis
+        x_w = x * math.cos(self.argument_of_periapsis) - y * math.sin(self.argument_of_periapsis)
+        y_w = x * math.sin(self.argument_of_periapsis) + y * math.cos(self.argument_of_periapsis)
+        z_w = z
+        
+        # Rotate by inclination
+        x_i = x_w
+        y_i = y_w * math.cos(self.inclination) - z_w * math.sin(self.inclination)
+        z_i = y_w * math.sin(self.inclination) + z_w * math.cos(self.inclination)
+        
+        # Rotate by longitude of ascending node
+        x_final = x_i * math.cos(self.longitude_of_ascending_node) - y_i * math.sin(self.longitude_of_ascending_node)
+        y_final = x_i * math.sin(self.longitude_of_ascending_node) + y_i * math.cos(self.longitude_of_ascending_node)
+        z_final = z_i
+        
+        self.position = (x_final, y_final, z_final)
+        self.orbit_points.append((x_final, y_final))
+        if len(self.orbit_points) > 500:
+            self.orbit_points.pop(0)
+    
+    def check_click(self, mouse_pos, camera):
+        screen_x, screen_y = camera.world_to_screen(self.position[0], self.position[1])
+        distance = math.sqrt((mouse_pos[0] - screen_x)**2 + (mouse_pos[1] - screen_y)**2)
+        
+        if distance <= self.click_radius * (1 + camera.zoom/2):
+            self.is_selected = not self.is_selected
+            return True
+        return False
+    
+    def draw(self, screen, camera):
+        if len(self.orbit_points) > 1:
+            points = [camera.world_to_screen(x, y) for x, y in self.orbit_points]
+            pygame.draw.lines(screen, (*[c//2 for c in self.color], 255), False, points, 1)
+        
+        x, y = camera.world_to_screen(self.position[0], self.position[1])
+        star_radius = max(3, int(5 * camera.zoom))
+        pygame.draw.circle(screen, self.color, (x, y), star_radius)
+        
+        if self.is_selected:
+            selection_size = max(16, int(20 * camera.zoom))
+            rect = pygame.Rect(x - selection_size//2, y - selection_size//2, selection_size, selection_size)
+            pygame.draw.rect(screen, SELECTION_COLOR, rect, 2)
+            
+            # Draw name when selected
+            font = pygame.font.SysFont(None, 24)
+            text = font.render(self.name, True, self.color)
+            screen.blit(text, (x + selection_size//2 + 5, y - selection_size//2))
+
+def main():
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Sagittarius A* - S-Star Cluster Simulation")
+    clock = pygame.time.Clock()
+    
+    black_hole = BlackHole()
+    stars = {name: Star(name, params) for name, params in STAR_DATA.items()}
+    camera = Camera()
+    camera.zoom = 0.15  # Initial zoom to show full S2 orbit
+    
+    running = True
+    paused = False
+    time_scale = 640000.0
+    min_scale = 3600.0
+    max_scale = 31536000.0
+    
+    while running:
+        dt = clock.get_time() / 1000.0  # Convert to seconds
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                elif event.key == pygame.K_UP:
+                    camera.zoom *= 1.1
+                elif event.key == pygame.K_DOWN:
+                    camera.zoom /= 1.1
+                elif event.key == pygame.K_LEFT:
+                    time_scale = max(time_scale / 2, min_scale)
+                elif event.key == pygame.K_RIGHT:
+                    time_scale = min(time_scale * 2, max_scale)
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    # Check black hole first
+                    if black_hole.check_click(event.pos, camera):
+                        continue
+                    # Then check stars
+                    for star in stars.values():
+                        if star.check_click(event.pos, camera):
+                            break
+        
+        if not paused:
+            for star in stars.values():
+                star.update(time_scale)
+            black_hole.update(dt)  # Update black hole rotation and particles
+        
+        screen.fill(BACKGROUND)
+        black_hole.draw(screen, camera)
+        for star in stars.values():
+            star.draw(screen, camera)
+        
+        # Draw info
+        font = pygame.font.SysFont(None, 24)
+        time_unit = "years" if time_scale >= 31536000 else "days" if time_scale >= 86400 else "hours"
+        time_value = time_scale / (31536000 if time_unit == "years" else 86400 if time_unit == "days" else 3600)
+        
+        info = [
+            f"Time Scale: {time_value:.1f} {time_unit}/frame",
+            f"Zoom: {camera.zoom:.1f}x",
+            f"{'PAUSED' if paused else 'RUNNING'}",
+            "Selected stars: " + ", ".join(name for name, star in stars.items() if star.is_selected)
+        ]
+        
+        for i, line in enumerate(info):
+            text = font.render(line, True, WHITE)
+            screen.blit(text, (10, 10 + i * 25))
+        
+        screen.fill(BACKGROUND)
+        black_hole.draw(screen, camera)
+        for star in stars.values():
+            star.draw(screen, camera)
+        
+        # Draw info
+        font = pygame.font.SysFont(None, 24)
+        time_unit = "years" if time_scale >= 31536000 else "days" if time_scale >= 86400 else "hours"
+        time_value = time_scale / (31536000 if time_unit == "years" else 86400 if time_unit == "days" else 3600)
+        
+        info = [
+            f"Time Scale: {time_value:.1f} {time_unit}/frame",
+            f"Zoom: {camera.zoom:.1f}x",
+            f"{'PAUSED' if paused else 'RUNNING'}",
+            "Selected stars: " + ", ".join(name for name, star in stars.items() if star.is_selected)
+        ]
+        
+        for i, line in enumerate(info):
+            text = font.render(line, True, WHITE)
+            screen.blit(text, (10, 10 + i * 25))
+        
+        pygame.display.flip()
+        clock.tick(60)
+
+    pygame.quit()
+
+if __name__ == "__main__":
+    main()
